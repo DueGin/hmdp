@@ -44,6 +44,7 @@ public class CacheClient {
     public <R, ID> R queryWithPassThrough(
             String keyPrefix, ID id, Class<R> type,
             Function<ID, R> dbFallback, Long time, TimeUnit unit) {
+
         String key = RedisConstants.CACHE_SHOP_KEY + id;
         // 1.从redis查询商铺缓存
         String shopJson = stringRedisTemplate.opsForValue().get(key);
@@ -82,6 +83,7 @@ public class CacheClient {
     public <R, ID> R queryWithLogicalExpire(
             String keyPrefix, ID id, Class<R> type,
             Function<ID, R> dbFallback, Long time, TimeUnit unit) {
+
         String key = CACHE_SHOP_KEY + id;
         // 1.从redis查询商铺缓存
         String shopJson = stringRedisTemplate.opsForValue().get(key);
