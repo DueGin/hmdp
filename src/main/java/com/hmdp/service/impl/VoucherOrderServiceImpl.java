@@ -9,8 +9,10 @@ import com.hmdp.service.ISeckillVoucherService;
 import com.hmdp.service.IVoucherOrderService;
 import com.hmdp.utils.RedisIdWorker;
 import com.hmdp.utils.UserHolder;
+import com.hmdp.utils.lock.SimpleRedisLock;
 import org.jetbrains.annotations.NotNull;
 import org.springframework.aop.framework.AopContext;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,7 +26,8 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     private ISeckillVoucherService seckillVoucherService;
     @Resource
     private RedisIdWorker redisIdWorker;
-
+    @Resource
+    private StringRedisTemplate stringRedisTemplate;
 
     @Override
     public Result seckillVoucher(Long voucherId) {
@@ -48,16 +51,22 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
         // 5.一人一单
         Long userId = UserHolder.getUser().getId();
-        // 1. 设置同步锁来实现一人一单，我们不希望将synchronized放在方法上，因为这样锁的是this，也就是整个对象
-        // 2. 由于只需要用户自己锁自己，所以我们可以使用userId来锁住，当不同的用户来的时候，获得不同的锁，相同用户获取同一把锁
-        // 3. 如果我们在进入方法后再上锁的话，那么在提交事务的时候，是先释放锁，再提交事务，这个就会导致问题。再释放锁后，其他线程就可以进入，那么
-        //   新进来的线程他就会去查询，查询的仍是旧数据，这就也有可能导致一人多单了，所以需要先提交事务，再释放锁，应该锁住整个方法
-        // 4. createVoucherOrder方法在这调用的话，this是当前对象，此时事务是不会生效的，这也是spring事务不生效的坑之一
-        //    所以需要用代理对象来去调用才能生效，通过AopContext.currentProxy()可以获取当前对象的代理对象
-        synchronized (userId.toString().intern()) {
+        // 创建锁对象
+        SimpleRedisLock lock = new SimpleRedisLock("order:" + userId, stringRedisTemplate);
+        boolean isLock = lock.tryLock(1200);
+        // 判断是否获取锁成功
+        if (!isLock) {
+            // 获取锁失败，返回错误或重试
+            return Result.fail("不允许重复下单");
+        }
+
+        try {
             // 获取代理对象（事务）
             IVoucherOrderService proxy = (IVoucherOrderService) AopContext.currentProxy();
             return proxy.createVoucherOrder(userId, voucherId);
+        } finally {
+            // 释放锁
+            lock.unlock();
         }
     }
 
